@@ -37,41 +37,55 @@ jobs:
       - name: Instalar requests
         run: pip install requests
 
-      - name: Descargar resumen.json del ultimo pipeline
+      - name: Descargar datos privados (resumen + preferencias)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "Buscando ultimo artefacto resumen-data..."
-          # Obtener ultimo run exitoso del pipeline
-          RUN_ID=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
-            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/val-semanal.yml/runs?status=success&per_page=1" \
-            | python3 -c "import sys,json; runs=json.load(sys.stdin).get('workflow_runs',[]); print(runs[0]['id'] if runs else '')" 2>/dev/null || echo "")
+          # Funcion para descargar artifact de un workflow
+          download_artifact() {
+            local WORKFLOW=$1
+            local ARTIFACT_NAME=$2
+            echo "Buscando artifact '$ARTIFACT_NAME' de $WORKFLOW..."
 
-          if [ -z "$RUN_ID" ]; then
-            echo "No hay pipeline exitoso. El bot arrancara sin datos."
-          else
-            echo "Pipeline run: $RUN_ID"
-            # Buscar artifact resumen-data
+            RUN_ID=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
+              "https://api.github.com/repos/${{ github.repository }}/actions/workflows/$WORKFLOW/runs?status=success&per_page=1" \
+              | python3 -c "import sys,json; runs=json.load(sys.stdin).get('workflow_runs',[]); print(runs[0]['id'] if runs else '')" 2>/dev/null || echo "")
+
+            if [ -z "$RUN_ID" ]; then
+              echo "  No hay runs exitosos de $WORKFLOW"
+              return 1
+            fi
+
             ARTIFACT_URL=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
               "https://api.github.com/repos/${{ github.repository }}/actions/runs/$RUN_ID/artifacts" \
               | python3 -c "
           import sys, json
           arts = json.load(sys.stdin).get('artifacts', [])
           for a in arts:
-              if a['name'] == 'resumen-data' and not a.get('expired', False):
+              if a['name'] == '$ARTIFACT_NAME' and not a.get('expired', False):
                   print(a['archive_download_url'])
                   break
           " 2>/dev/null || echo "")
 
             if [ -z "$ARTIFACT_URL" ]; then
-              echo "No se encontro artefacto resumen-data"
-            else
-              curl -L -s -H "Authorization: token $GITHUB_TOKEN" -o resumen.zip "$ARTIFACT_URL"
-              unzip -o resumen.zip -d . 2>/dev/null && echo "resumen.json descargado OK" || echo "Error descomprimiendo"
-              rm -f resumen.zip
-              [ -f resumen.json ] && echo "Tamano: $(wc -c < resumen.json) bytes"
+              echo "  No se encontro artifact '$ARTIFACT_NAME'"
+              return 1
             fi
-          fi
+
+            curl -L -s -H "Authorization: token $GITHUB_TOKEN" -o _tmp.zip "$ARTIFACT_URL"
+            unzip -o _tmp.zip -d . 2>/dev/null && echo "  $ARTIFACT_NAME descargado OK" || echo "  Error descomprimiendo"
+            rm -f _tmp.zip
+          }
+
+          # Descargar resumen.json del pipeline
+          download_artifact "val-semanal.yml" "resumen-data"
+          [ -f resumen.json ] && echo "  resumen.json: $(wc -c < resumen.json) bytes"
+
+          # Descargar preferencias.json de la ejecucion anterior del bot
+          download_artifact "bot-telegram.yml" "preferencias-data"
+          [ -f preferencias.json ] && echo "  preferencias.json: $(wc -c < preferencias.json) bytes"
+
+          echo "Descarga completada."
 
       - name: Test API GitHub Models
         env:
@@ -103,3 +117,13 @@ jobs:
           MAX_RUNTIME_HOURS: '5'
           HORA_FIN: '23'
         run: python bot_polling_worker.py
+
+      - name: Guardar preferencias como artefacto
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: preferencias-data
+          path: preferencias.json
+          retention-days: 90
+          if-no-files-found: ignore
+          overwrite: true

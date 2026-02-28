@@ -118,65 +118,34 @@ def _fmt(numero):
 # ============================================================
 
 def _cargar_preferencias():
-    """Carga preferencias de estilo desde el repo."""
+    """Carga preferencias de estilo desde archivo local."""
     global _preferencias
+    local_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), PREFERENCIAS_FILE)
     try:
-        api_url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{PREFERENCIAS_FILE}"
-        resp = requests.get(
-            api_url,
-            headers={
-                "Authorization": f"token {GITHUB_TOKEN}",
-                "Accept": "application/vnd.github.v3.raw",
-            },
-            timeout=10,
-        )
-        if resp.status_code == 200:
-            data = resp.json()
+        if os.path.exists(local_path):
+            with open(local_path, encoding="utf-8") as f:
+                data = json.load(f)
             _preferencias = data.get("reglas", [])[:MAX_PREFERENCIAS]
             print(f"  Preferencias: {len(_preferencias)} reglas cargadas")
             return True
+        else:
+            print("  Preferencias: sin archivo local (primera ejecucion)")
     except Exception as e:
         print(f"  [WARN] Error cargando preferencias: {e}")
     return False
 
 
 def _guardar_preferencias():
-    """Guarda preferencias en el repo via GitHub API."""
-    content_str = json.dumps(
-        {"reglas": _preferencias}, ensure_ascii=False, indent=2
-    )
-    encoded = base64.b64encode(content_str.encode("utf-8")).decode("ascii")
-
-    api_url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{PREFERENCIAS_FILE}"
-    headers = {
-        "Authorization": f"token {GITHUB_TOKEN}",
-        "Accept": "application/vnd.github.v3+json",
-    }
-
-    # Obtener SHA actual (necesario para update)
-    sha = None
+    """Guarda preferencias en archivo local (se sube como artifact al final)."""
+    local_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), PREFERENCIAS_FILE)
     try:
-        r = requests.get(api_url, headers=headers, timeout=10)
-        if r.status_code == 200:
-            sha = r.json().get("sha")
-    except Exception:
-        pass
-
-    payload = {
-        "message": "Bot: actualizar preferencias de estilo",
-        "content": encoded,
-    }
-    if sha:
-        payload["sha"] = sha
-
-    try:
-        r = requests.put(api_url, json=payload, headers=headers, timeout=10)
-        ok = r.status_code in (200, 201)
-        if ok:
-            print(f"  Preferencias guardadas ({len(_preferencias)} reglas)")
-        else:
-            print(f"  [WARN] Error guardando preferencias: {r.status_code}")
-        return ok
+        content = json.dumps(
+            {"reglas": _preferencias}, ensure_ascii=False, indent=2
+        )
+        with open(local_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        print(f"  Preferencias guardadas ({len(_preferencias)} reglas)")
+        return True
     except Exception as e:
         print(f"  [ERROR] Guardando preferencias: {e}")
         return False
