@@ -1,0 +1,105 @@
+name: Agente Valorizacion Semanal
+
+on:
+  schedule:
+    # Solo LUNES y MARTES, cada 1 hora de 9AM a 6PM (hora Peru)
+    # Peru = UTC-5, entonces:
+    #   9AM Peru = 14:00 UTC
+    #   6PM Peru = 23:00 UTC
+    - cron: '0 14-23 * * 1,2'
+
+  # Permite ejecutar manualmente desde GitHub
+  workflow_dispatch:
+    inputs:
+      modo:
+        description: 'Modo de ejecucion'
+        required: false
+        default: 'completo'
+        type: choice
+        options:
+          - 'completo'
+          - 'solo-buscar'
+          - 'verificar'
+
+jobs:
+  valorizacion-semanal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout codigo
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      - name: Restaurar credenciales Google
+        env:
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+          GOOGLE_TOKEN: ${{ secrets.GOOGLE_TOKEN }}
+        run: |
+          echo "$GOOGLE_CREDENTIALS" > credentials.json
+          echo "$GOOGLE_TOKEN" > token.json
+
+      - name: Crear directorios necesarios
+        run: mkdir -p reportes temp_files logs
+
+      - name: Ejecutar pipeline completo
+        if: github.event.inputs.modo != 'solo-buscar' && github.event.inputs.modo != 'verificar'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          OBRA_FOLDER_IDS: ${{ secrets.OBRA_FOLDER_IDS }}
+          SENDER_TO_OBRA: ${{ secrets.SENDER_TO_OBRA }}
+          GITHUB_ACTIONS: true
+        run: python main.py
+
+      - name: Solo buscar correos (sin procesar)
+        if: github.event.inputs.modo == 'solo-buscar'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          OBRA_FOLDER_IDS: ${{ secrets.OBRA_FOLDER_IDS }}
+          SENDER_TO_OBRA: ${{ secrets.SENDER_TO_OBRA }}
+          GITHUB_ACTIONS: true
+        run: python main.py --solo-buscar
+
+      - name: Verificar Folder IDs
+        if: github.event.inputs.modo == 'verificar'
+        env:
+          OBRA_FOLDER_IDS: ${{ secrets.OBRA_FOLDER_IDS }}
+          SENDER_TO_OBRA: ${{ secrets.SENDER_TO_OBRA }}
+          GITHUB_ACTIONS: true
+        run: python main.py --verificar
+
+      - name: Guardar resumen.json como artefacto
+        if: github.event.inputs.modo != 'solo-buscar' && github.event.inputs.modo != 'verificar'
+        uses: actions/upload-artifact@v4
+        with:
+          name: resumen-data
+          path: resumen.json
+          retention-days: 90
+          if-no-files-found: ignore
+
+      - name: Guardar token actualizado
+        if: always()
+        run: |
+          if [ -f token.json ]; then
+            echo "Token presente tras ejecucion"
+          fi
+
+      - name: Guardar reportes como artefacto
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reportes-${{ github.run_number }}
+          path: |
+            reportes/
+            logs/
+          retention-days: 7
