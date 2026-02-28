@@ -1,7 +1,7 @@
 """
 Modulo de autenticacion OAuth2 con Gmail y Drive API.
 Maneja el flujo de autorizacion y almacenamiento de tokens.
-(Adaptado de gmail-comparativos-agent)
+(Autenticacion OAuth2 para Gmail y Drive)
 
 Soporta ejecucion en:
 - Local (abre navegador para autorizar)
@@ -47,7 +47,7 @@ def _obtener_credenciales():
                 raise FileNotFoundError(
                     f"Archivo de credenciales no encontrado: {CREDENTIALS_FILE}\n"
                     "Descargalo desde Google Cloud Console > APIs & Services > Credentials\n"
-                    "O copia el credentials.json del proyecto gmail-comparativos-agent."
+                    "O copia el credentials.json de otro proyecto con OAuth configurado."
                 )
 
             print("[AUTH] Iniciando flujo de autorizacion OAuth2...")
